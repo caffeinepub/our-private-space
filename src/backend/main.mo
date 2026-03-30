@@ -14,15 +14,12 @@ import Storage "blob-storage/Storage";
 import InviteLinksModule "invite-links/invite-links-module";
 
 actor {
-  // Include authorization and storage mixins
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
   include MixinStorage();
 
-  // Initialize invite link system state
   let inviteState = InviteLinksModule.initState();
 
-  // Type definitions
   type MessageId = Text;
 
   type MediaReference = {
@@ -47,7 +44,6 @@ actor {
     name : Text;
   };
 
-  // Compare module for ChatMessage based on timestamp
   module ChatMessage {
     public func compare(msg1 : ChatMessage, msg2 : ChatMessage) : Order.Order {
       if (msg1.timestamp < msg2.timestamp) { return #less };
@@ -56,12 +52,10 @@ actor {
     };
   };
 
-  // Messages and deleted messages
   let messages = Map.empty<MessageId, ChatMessage>();
   let deletedMessages = Map.empty<MessageId, ()>();
   let userProfiles = Map.empty<Principal, UserProfile>();
 
-  // User profile management functions
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can view profiles");
@@ -83,12 +77,10 @@ actor {
     userProfiles.add(caller, profile);
   };
 
-  // Send chat message (admin or user only)
   public shared ({ caller }) func sendMessage(input : MessageInput) : async MessageId {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users or admins can send messages");
     };
-
     let blob = await Random.blob();
     let id = InviteLinksModule.generateUUID(blob);
     let message : ChatMessage = {
@@ -102,41 +94,35 @@ actor {
     id;
   };
 
-  // Retrieve all messages (users only - private chat)
   public query ({ caller }) func getAllMessages() : async [ChatMessage] {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can view messages");
     };
-    messages.values().toArray().sort();
+    let deleted = deletedMessages;
+    messages.values().filter(func(m) { not deleted.containsKey(m.id) }).toArray().sort();
   };
 
-  // Delete message (admin or original sender)
   public shared ({ caller }) func deleteMessage(messageId : MessageId) : async () {
     let chatMessage = switch (messages.get(messageId)) {
       case (null) { Runtime.trap("Message not found") };
       case (?msg) { msg };
     };
-
     if (not (AccessControl.isAdmin(accessControlState, caller) or caller == chatMessage.sender)) {
       Runtime.trap("Unauthorized: Only admin or original sender can delete this message");
     };
-
     if (deletedMessages.containsKey(messageId)) {
       Runtime.trap("Message already deleted");
     };
-
     deletedMessages.add(messageId, ());
   };
 
-  // Admin: Retrieve all deleted message IDs
   public query ({ caller }) func getDeletedMessageIds() : async [Text] {
-    if (not (AccessControl.isAdmin(accessControlState, caller))) {
-      Runtime.trap("Unauthorized: Only admin can view deleted messages");
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view deleted messages");
     };
     deletedMessages.keys().toArray();
   };
 
-  // Generate invite code using invite link system (admin required)
   public shared ({ caller }) func generateInviteCode() : async Text {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admin can generate invite codes");
@@ -147,12 +133,15 @@ actor {
     code;
   };
 
-  // Submit RSVP (with valid invite code, authenticated)
+  // Grants #user role to caller after successful RSVP
   public shared ({ caller }) func submitRSVP(name : Text, attending : Bool, inviteCode : Text) : async () {
     InviteLinksModule.submitRSVP(inviteState, name, attending, inviteCode);
+    switch (accessControlState.userRoles.get(caller)) {
+      case (null) { accessControlState.userRoles.add(caller, #user) };
+      case (?_) {};
+    };
   };
 
-  // Admin: Retrieve all RSVPs
   public query ({ caller }) func getAllRSVPs() : async [InviteLinksModule.RSVP] {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admin can view RSVPs");
@@ -160,7 +149,6 @@ actor {
     InviteLinksModule.getAllRSVPs(inviteState);
   };
 
-  // Admin: Retrieve all invite codes
   public query ({ caller }) func getInviteCodes() : async [InviteLinksModule.InviteCode] {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admin can view invite codes");

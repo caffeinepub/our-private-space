@@ -9,12 +9,7 @@ export function useGetAllMessages() {
     queryKey: ["messages"],
     queryFn: async () => {
       if (!actor) return [];
-      const [messages, deletedIds] = await Promise.all([
-        actor.getAllMessages(),
-        actor.getDeletedMessageIds(),
-      ]);
-      const deletedSet = new Set(deletedIds);
-      return messages.filter((m) => !deletedSet.has(m.id));
+      return actor.getAllMessages();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 3000,
@@ -27,7 +22,11 @@ export function useGetCallerProfile() {
     queryKey: ["callerProfile"],
     queryFn: async () => {
       if (!actor) return null;
-      return actor.getCallerUserProfile();
+      try {
+        return await actor.getCallerUserProfile();
+      } catch {
+        return null;
+      }
     },
     enabled: !!actor && !isFetching,
   });
